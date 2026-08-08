@@ -69,7 +69,7 @@
         .tile.hint-tile {
             box-shadow: inset 0 0 0 4px #00ffff, 0 0 18px #00ffff !important;
             z-index: 10;
-            animation: pulse 0.5s infinite alternate;
+            animation: pulse 0.4s infinite alternate;
         }
         @keyframes pulse {
             from { transform: scale(0.96); }
@@ -148,7 +148,6 @@
 
         let currentLevel = 0;
         let tiles = [];
-        let lastHintTileIndex = null;
         const container = document.getElementById('puzzle-container');
         const statusText = document.getElementById('status');
         const levelInfo = document.getElementById('level-info');
@@ -158,7 +157,6 @@
             statusText.innerText = '';
             nextBtn.style.display = 'none';
             levelInfo.innerText = `Level ${currentLevel + 1} of ${IMAGE_URLS.length}`;
-            lastHintTileIndex = null;
 
             do {
                 tiles = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => i);
@@ -244,76 +242,130 @@
             }
         }
 
-        // Calculate Manhattan distance heuristic for a state
-        function getManhattanDistance(state) {
-            let dist = 0;
-            for (let i = 0; i < state.length; i++) {
-                const val = state[i];
-                if (val !== EMPTY_TILE) {
-                    const targetRow = Math.floor(val / GRID_SIZE);
-                    const targetCol = val % GRID_SIZE;
-                    const currentRow = Math.floor(i / GRID_SIZE);
-                    const currentCol = i % GRID_SIZE;
-                    dist += Math.abs(targetRow - currentRow) + Math.abs(targetCol - currentCol);
-                }
-            }
-            return dist;
+        // --- STAGE-BASED HINT ENGINE ---
+
+        function getStageInfo(state) {
+            if (state[0] !== 0) return { target: [0], locked: [] };
+            if (state[1] !== 1) return { target: [1], locked: [0] };
+            if (state[2] !== 2 || state[3] !== 3) return { target: [2, 3], locked: [0, 1] };
+            if (state[4] !== 4) return { target: [4], locked: [0, 1, 2, 3] };
+            if (state[5] !== 5) return { target: [5], locked: [0, 1, 2, 3, 4] };
+            if (state[6] !== 6 || state[7] !== 7) return { target: [6, 7], locked: [0, 1, 2, 3, 4, 5] };
+            return { target: [8, 9, 10, 11, 12, 13, 14, 15], locked: [0, 1, 2, 3, 4, 5, 6, 7] };
         }
 
-        // Evaluates immediate surrounding options to recommend the best step forward
-        function getBestImmediateMove(currentState) {
-            const emptyIndex = currentState.indexOf(EMPTY_TILE);
-            const emptyRow = Math.floor(emptyIndex / GRID_SIZE);
-            const emptyCol = emptyIndex % GRID_SIZE;
+        function isStageSatisfied(state, stage) {
+            for (let t of stage.target) {
+                if (state[t] !== t) return false;
+            }
+            return true;
+        }
 
-            const neighbors = [
-                { r: emptyRow - 1, c: emptyCol },
-                { r: emptyRow + 1, c: emptyCol },
-                { r: emptyRow, c: emptyCol - 1 },
-                { r: emptyRow, c: emptyCol + 1 }
-            ];
-
-            let bestTileIndex = null;
-            let minDistance = Infinity;
-
-            for (const n of neighbors) {
-                if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
-                    const targetTileIndex = n.r * GRID_SIZE + n.c;
-
-                    // Avoid bouncing back and forth on consecutive clicks
-                    if (targetTileIndex === lastHintTileIndex && neighbors.length > 1) {
-                        continue;
-                    }
-
-                    const newState = [...currentState];
-                    [newState[emptyIndex], newState[targetTileIndex]] = [newState[targetTileIndex], newState[emptyIndex]];
-
-                    const dist = getManhattanDistance(newState);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        bestTileIndex = targetTileIndex;
-                    }
+        function getStageHeuristic(state, stage) {
+            let h = 0;
+            for (let t of stage.target) {
+                const idx = state.indexOf(t);
+                const tr = Math.floor(t / GRID_SIZE);
+                const tc = t % GRID_SIZE;
+                const cr = Math.floor(idx / GRID_SIZE);
+                const cc = idx % GRID_SIZE;
+                h += (Math.abs(tr - cr) + Math.abs(tc - cc)) * 10;
+            }
+            for (let i = 0; i < state.length; i++) {
+                if (state[i] !== EMPTY_TILE) {
+                    const val = state[i];
+                    const tr = Math.floor(val / GRID_SIZE);
+                    const tc = val % GRID_SIZE;
+                    const cr = Math.floor(i / GRID_SIZE);
+                    const cc = i % GRID_SIZE;
+                    h += Math.abs(tr - cr) + Math.abs(tc - cc);
                 }
             }
+            return h;
+        }
 
-            // Fallback in case every neighbor option was skipped
-            if (bestTileIndex === null) {
+        function getNextBestMove(startState) {
+            const stage = getStageInfo(startState);
+            const openSet = [{ 
+                state: startState, 
+                g: 0, 
+                h: getStageHeuristic(startState, stage), 
+                firstMove: null 
+            }];
+            
+            const visited = new Set();
+            visited.add(startState.join(','));
+
+            let iterations = 0;
+            const maxIterations = 5000;
+
+            while (openSet.length > 0 && iterations < maxIterations) {
+                iterations++;
+                openSet.sort((a, b) => (a.g + a.h) - (b.g + b.h));
+                const current = openSet.shift();
+
+                if (isStageSatisfied(current.state, stage)) {
+                    return current.firstMove;
+                }
+
+                const emptyIndex = current.state.indexOf(EMPTY_TILE);
+                const row = Math.floor(emptyIndex / GRID_SIZE);
+                const col = emptyIndex % GRID_SIZE;
+
+                const neighbors = [
+                    { r: row - 1, c: col },
+                    { r: row + 1, c: col },
+                    { r: row, c: col - 1 },
+                    { r: row, c: col + 1 }
+                ];
+
                 for (const n of neighbors) {
                     if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
-                        return n.r * GRID_SIZE + n.c;
+                        const targetIndex = n.r * GRID_SIZE + n.c;
+                        const newState = [...current.state];
+                        [newState[emptyIndex], newState[targetIndex]] = [newState[targetIndex], newState[emptyIndex]];
+
+                        const key = newState.join(',');
+                        if (!visited.has(key)) {
+                            visited.add(key);
+                            
+                            let stepCost = 1;
+                            if (stage.locked.includes(targetIndex)) {
+                                stepCost += 40; // Discourages disturbing completed rows
+                            }
+
+                            openSet.push({
+                                state: newState,
+                                g: current.g + stepCost,
+                                h: getStageHeuristic(newState, stage),
+                                firstMove: current.firstMove === null ? targetIndex : current.firstMove
+                            });
+                        }
                     }
                 }
             }
 
-            return bestTileIndex;
+            // Fallback: If empty tile has adjacent tiles, pick one
+            const emptyIndex = startState.indexOf(EMPTY_TILE);
+            const row = Math.floor(emptyIndex / GRID_SIZE);
+            const col = emptyIndex % GRID_SIZE;
+            const fallbacks = [
+                { r: row - 1, c: col }, { r: row + 1, c: col },
+                { r: row, c: col - 1 }, { r: row, c: col + 1 }
+            ];
+            for (let f of fallbacks) {
+                if (f.r >= 0 && f.r < GRID_SIZE && f.c >= 0 && f.c < GRID_SIZE) {
+                    return f.r * GRID_SIZE + f.c;
+                }
+            }
+            return null;
         }
 
         function showHint() {
             if (isSolved(tiles)) return;
 
-            const nextMoveTileIndex = getBestImmediateMove(tiles);
+            const nextMoveTileIndex = getNextBestMove(tiles);
             if (nextMoveTileIndex !== null) {
-                lastHintTileIndex = nextMoveTileIndex;
                 const tileElements = container.querySelectorAll('.tile');
                 const targetElement = tileElements[nextMoveTileIndex];
 
