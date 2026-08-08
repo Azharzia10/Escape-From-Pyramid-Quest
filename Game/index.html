@@ -67,8 +67,13 @@
         }
         /* Hint highlight animation */
         .tile.hint-tile {
-            box-shadow: inset 0 0 0 3px #00ffff, 0 0 15px #00ffff !important;
+            box-shadow: inset 0 0 0 4px #00ffff, 0 0 18px #00ffff !important;
             z-index: 10;
+            animation: pulse 0.5s infinite alternate;
+        }
+        @keyframes pulse {
+            from { transform: scale(0.96); }
+            to { transform: scale(1.02); }
         }
         #status {
             margin-top: 20px;
@@ -143,6 +148,7 @@
 
         let currentLevel = 0;
         let tiles = [];
+        let lastHintTileIndex = null;
         const container = document.getElementById('puzzle-container');
         const statusText = document.getElementById('status');
         const levelInfo = document.getElementById('level-info');
@@ -152,6 +158,7 @@
             statusText.innerText = '';
             nextBtn.style.display = 'none';
             levelInfo.innerText = `Level ${currentLevel + 1} of ${IMAGE_URLS.length}`;
+            lastHintTileIndex = null;
 
             do {
                 tiles = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => i);
@@ -237,7 +244,7 @@
             }
         }
 
-        // Fast A* Solver for 4x4 Grid
+        // Calculate Manhattan distance heuristic for a state
         function getManhattanDistance(state) {
             let dist = 0;
             for (let i = 0; i < state.length; i++) {
@@ -253,11 +260,60 @@
             return dist;
         }
 
+        // Evaluates immediate surrounding options to recommend the best step forward
+        function getBestImmediateMove(currentState) {
+            const emptyIndex = currentState.indexOf(EMPTY_TILE);
+            const emptyRow = Math.floor(emptyIndex / GRID_SIZE);
+            const emptyCol = emptyIndex % GRID_SIZE;
+
+            const neighbors = [
+                { r: emptyRow - 1, c: emptyCol },
+                { r: emptyRow + 1, c: emptyCol },
+                { r: emptyRow, c: emptyCol - 1 },
+                { r: emptyRow, c: emptyCol + 1 }
+            ];
+
+            let bestTileIndex = null;
+            let minDistance = Infinity;
+
+            for (const n of neighbors) {
+                if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
+                    const targetTileIndex = n.r * GRID_SIZE + n.c;
+
+                    // Avoid bouncing back and forth on consecutive clicks
+                    if (targetTileIndex === lastHintTileIndex && neighbors.length > 1) {
+                        continue;
+                    }
+
+                    const newState = [...currentState];
+                    [newState[emptyIndex], newState[targetTileIndex]] = [newState[targetTileIndex], newState[emptyIndex]];
+
+                    const dist = getManhattanDistance(newState);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        bestTileIndex = targetTileIndex;
+                    }
+                }
+            }
+
+            // Fallback in case every neighbor option was skipped
+            if (bestTileIndex === null) {
+                for (const n of neighbors) {
+                    if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
+                        return n.r * GRID_SIZE + n.c;
+                    }
+                }
+            }
+
+            return bestTileIndex;
+        }
+
         function showHint() {
             if (isSolved(tiles)) return;
 
-            const nextMoveTileIndex = getNextBestMove(tiles);
+            const nextMoveTileIndex = getBestImmediateMove(tiles);
             if (nextMoveTileIndex !== null) {
+                lastHintTileIndex = nextMoveTileIndex;
                 const tileElements = container.querySelectorAll('.tile');
                 const targetElement = tileElements[nextMoveTileIndex];
 
@@ -270,56 +326,6 @@
                     }, 1500);
                 }
             }
-        }
-
-        function getNextBestMove(startState) {
-            const openSet = [{ state: startState, g: 0, h: getManhattanDistance(startState), firstMove: null }];
-            const visited = new Set();
-            visited.add(startState.join(','));
-
-            let iterations = 0;
-            const maxIterations = 8000;
-
-            while (openSet.length > 0 && iterations < maxIterations) {
-                iterations++;
-                openSet.sort((a, b) => (a.g + a.h) - (b.g + b.h));
-                const current = openSet.shift();
-
-                if (isSolved(current.state)) {
-                    return current.firstMove;
-                }
-
-                const emptyIndex = current.state.indexOf(EMPTY_TILE);
-                const row = Math.floor(emptyIndex / GRID_SIZE);
-                const col = emptyIndex % GRID_SIZE;
-
-                const neighbors = [
-                    { r: row - 1, c: col },
-                    { r: row + 1, c: col },
-                    { r: row, c: col - 1 },
-                    { r: row, c: col + 1 }
-                ];
-
-                for (const n of neighbors) {
-                    if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
-                        const targetIndex = n.r * GRID_SIZE + n.c;
-                        const newState = [...current.state];
-                        [newState[emptyIndex], newState[targetIndex]] = [newState[targetIndex], newState[emptyIndex]];
-
-                        const key = newState.join(',');
-                        if (!visited.has(key)) {
-                            visited.add(key);
-                            openSet.push({
-                                state: newState,
-                                g: current.g + 1,
-                                h: getManhattanDistance(newState),
-                                firstMove: current.firstMove === null ? targetIndex : current.firstMove
-                            });
-                        }
-                    }
-                }
-            }
-            return null;
         }
 
         function nextLevel() {
