@@ -9,6 +9,7 @@
             box-sizing: border-box;
             user-select: none;
             -webkit-user-select: none;
+            touch-action: none; /* Prevents default mobile browser scrolling while dragging tiles */
         }
         body {
             background-color: #1a0f1d;
@@ -37,6 +38,37 @@
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+
+        /* Container layout holding both reference image and active board */
+        .game-layout {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .reference-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+        .reference-card span {
+            font-size: 0.85rem;
+            color: #e0b0ff;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        #reference-img {
+            width: 140px;
+            height: 140px;
+            border: 4px solid #4a2850;
+            border-radius: 8px;
+            object-fit: cover;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.5);
+        }
+
         #puzzle-container {
             width: 320px;
             height: 320px;
@@ -49,16 +81,20 @@
             grid-template-rows: repeat(4, 1fr);
             gap: 0;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+            position: relative;
         }
         .tile {
             width: 100%;
             height: 100%;
             border-radius: 0;
-            cursor: pointer;
+            cursor: grab;
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 4px rgba(0, 0, 0, 0.4);
             background-repeat: no-repeat;
             background-size: 304px 304px;
             transition: transform 0.15s ease-in-out, box-shadow 0.2s;
+        }
+        .tile:active {
+            cursor: grabbing;
         }
         .tile.empty {
             background: transparent !important;
@@ -100,6 +136,7 @@
             cursor: pointer;
             box-shadow: 0 4px 10px rgba(255, 215, 0, 0.3);
             transition: transform 0.1s, background-color 0.2s;
+            touch-action: auto;
         }
         button:active {
             transform: scale(0.95);
@@ -121,7 +158,18 @@
 
     <h1>Escape From Pyramid Quest!</h1>
     <div id="level-info">Level 1</div>
-    <div id="puzzle-container"></div>
+    
+    <div class="game-layout">
+        <!-- Target Reference Image Box -->
+        <div class="reference-card">
+            <span>Target Goal</span>
+            <img id="reference-img" src="" alt="Target Reference">
+        </div>
+
+        <!-- Sliding Puzzle Grid -->
+        <div id="puzzle-container"></div>
+    </div>
+
     <div id="status"></div>
     
     <div class="button-group">
@@ -148,17 +196,24 @@
 
         let currentLevel = 0;
         let tiles = [];
-        let cachedHintPath = []; // Memory cache for non-looping hint paths
+        let cachedHintPath = []; 
 
         const container = document.getElementById('puzzle-container');
+        const refImage = document.getElementById('reference-img');
         const statusText = document.getElementById('status');
         const levelInfo = document.getElementById('level-info');
         const nextBtn = document.getElementById('next-btn');
+
+        // Touch / Gesture Variables
+        let startX = 0;
+        let startY = 0;
+        let activeTileIndex = null;
 
         function initGame() {
             statusText.innerText = '';
             nextBtn.style.display = 'none';
             levelInfo.innerText = `Level ${currentLevel + 1} of ${IMAGE_URLS.length}`;
+            refImage.src = IMAGE_URLS[currentLevel];
             cachedHintPath = [];
 
             do {
@@ -216,10 +271,69 @@
 
                     tile.style.backgroundImage = `url('${currentImage}')`;
                     tile.style.backgroundPosition = `${xPos}px ${yPos}px`;
-                    tile.addEventListener('click', () => moveTile(index));
+                    
+                    // Attach pointer drag / slide gestures
+                    tile.addEventListener('pointerdown', (e) => handlePointerDown(e, index));
                 }
                 container.appendChild(tile);
             });
+        }
+
+        // --- SLIDE GESTURE LOGIC ---
+
+        function handlePointerDown(e, index) {
+            startX = e.clientX;
+            startY = e.clientY;
+            activeTileIndex = index;
+
+            const onPointerMove = (moveEvent) => {
+                if (activeTileIndex === null) return;
+
+                const diffX = moveEvent.clientX - startX;
+                const diffY = moveEvent.clientY - startY;
+                const minSwipeDistance = 20; // Minimum drag sensitivity in pixels
+
+                if (Math.abs(diffX) > minSwipeDistance || Math.abs(diffY) > minSwipeDistance) {
+                    const emptyIndex = tiles.indexOf(EMPTY_TILE);
+                    const row = Math.floor(activeTileIndex / GRID_SIZE);
+                    const col = activeTileIndex % GRID_SIZE;
+                    const emptyRow = Math.floor(emptyIndex / GRID_SIZE);
+                    const emptyCol = emptyIndex % GRID_SIZE;
+
+                    let intendedMove = false;
+
+                    // Determine intended drag direction towards the empty space
+                    if (Math.abs(diffX) > Math.abs(diffY)) {
+                        // Horizontal Swipe
+                        if (diffX > 0 && emptyRow === row && emptyCol === col + 1) intendedMove = true;
+                        if (diffX < 0 && emptyRow === row && emptyCol === col - 1) intendedMove = true;
+                    } else {
+                        // Vertical Swipe
+                        if (diffY > 0 && emptyRow === row + 1 && emptyCol === col) intendedMove = true;
+                        if (diffY < 0 && emptyRow === row - 1 && emptyCol === col) intendedMove = true;
+                    }
+
+                    if (intendedMove) {
+                        moveTile(activeTileIndex);
+                    }
+
+                    // Reset tracking to prevent double triggers
+                    cleanup();
+                }
+            };
+
+            const onPointerUp = () => {
+                cleanup();
+            };
+
+            const cleanup = () => {
+                activeTileIndex = null;
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+            };
+
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
         }
 
         function moveTile(index) {
@@ -246,7 +360,7 @@
             }
         }
 
-        // --- GUARANTEED SUB-GOAL PATH ENGINE ---
+        // --- SUB-GOAL PATH ENGINE FOR HINTS ---
 
         function getStageInfo(state) {
             if (state[0] !== 0) return { targets: [0], isDone: s => s[0] === 0, locked: [] };
@@ -308,7 +422,6 @@
                     if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
                         const targetIndex = n.r * GRID_SIZE + n.c;
 
-                        // Never move or touch locked tiles
                         if (stage.locked.includes(targetIndex)) continue;
 
                         const newState = [...current.state];
@@ -333,7 +446,6 @@
         function showHint() {
             if (isSolved(tiles)) return;
 
-            // Check if cached path is valid for current empty position
             const emptyIdx = tiles.indexOf(EMPTY_TILE);
             if (cachedHintPath.length > 0) {
                 const nextTileIdx = cachedHintPath[0];
@@ -342,13 +454,11 @@
                 const tr = Math.floor(nextTileIdx / GRID_SIZE);
                 const tc = nextTileIdx % GRID_SIZE;
 
-                // Clear path if invalid due to user interactions
                 if (Math.abs(er - tr) + Math.abs(ec - tc) !== 1) {
                     cachedHintPath = [];
                 }
             }
 
-            // Generate fresh path if empty or reset
             if (cachedHintPath.length === 0) {
                 cachedHintPath = findPathForStage(tiles);
             }
@@ -360,7 +470,7 @@
 
                 if (targetElement) {
                     targetElement.classList.add('hint-tile');
-                    statusText.innerText = '💡 Try moving the highlighted tile!';
+                    statusText.innerText = '💡 Drag the highlighted tile!';
                     setTimeout(() => {
                         targetElement.classList.remove('hint-tile');
                         if (!isSolved(tiles)) statusText.innerText = '';
