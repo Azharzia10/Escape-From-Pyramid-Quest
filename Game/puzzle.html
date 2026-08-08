@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Pyramid Sliding Puzzle</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            background-color: #1a0f1d;
+            color: #ffd700;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        #level-info {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #e0b0ff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        #puzzle-container {
+            width: 320px;
+            height: 320px;
+            background: #2b1730;
+            border: 6px solid #4a2850;
+            border-radius: 12px;
+            padding: 8px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 0;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+        }
+        .tile {
+            width: 100%;
+            height: 100%;
+            border-radius: 0;
+            cursor: pointer;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 4px rgba(0, 0, 0, 0.4);
+            background-repeat: no-repeat;
+            background-size: 304px 304px;
+            transition: transform 0.15s ease-in-out, box-shadow 0.2s;
+        }
+        .tile.empty {
+            background: transparent !important;
+            box-shadow: none;
+            cursor: default;
+        }
+        /* Hint highlight animation */
+        .tile.hint-tile {
+            box-shadow: inset 0 0 0 3px #00ffff, 0 0 15px #00ffff !important;
+            z-index: 10;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 1.1rem;
+            height: 24px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: #1a0f1d;
+            background: #ffd700;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(255, 215, 0, 0.3);
+            transition: transform 0.1s, background-color 0.2s;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        #hint-btn {
+            background: #00bcd4;
+            color: #00252b;
+            box-shadow: 0 4px 10px rgba(0, 188, 212, 0.3);
+        }
+        #next-btn {
+            background: #00e676;
+            color: #003311;
+            box-shadow: 0 4px 10px rgba(0, 230, 118, 0.3);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Escape From Pyramid Quest!</h1>
+    <div id="level-info">Level 1</div>
+    <div id="puzzle-container"></div>
+    <div id="status"></div>
+    
+    <div class="button-group">
+        <button id="shuffle-btn" onclick="initGame()">Shuffle Board</button>
+        <button id="hint-btn" onclick="showHint()">💡 Hint</button>
+        <button id="next-btn" onclick="nextLevel()">Next Level ➔</button>
+    </div>
+
+    <script>
+        const GRID_SIZE = 4; // 4x4 Grid (16 blocks)
+        const EMPTY_TILE = GRID_SIZE * GRID_SIZE - 1; // Tile 15
+        
+        const IMAGE_URLS = [
+            'gameimage1.jpg',
+            'gameimage2.jpg',
+            'gameimage3.jpg',
+            'gameimage4.jpg',
+            'gameimage5.jpg',
+            'gameimage6.jpg',
+            'gameimage7.jpg',
+            'gameimage8.jpg',
+            'gameimage9.jpg'
+        ]; 
+
+        let currentLevel = 0;
+        let tiles = [];
+        const container = document.getElementById('puzzle-container');
+        const statusText = document.getElementById('status');
+        const levelInfo = document.getElementById('level-info');
+        const nextBtn = document.getElementById('next-btn');
+
+        function initGame() {
+            statusText.innerText = '';
+            nextBtn.style.display = 'none';
+            levelInfo.innerText = `Level ${currentLevel + 1} of ${IMAGE_URLS.length}`;
+
+            do {
+                tiles = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => i);
+                shuffle(tiles);
+            } while (!isSolvable(tiles) || isSolved(tiles));
+
+            render();
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function isSolvable(arr) {
+            let inversions = 0;
+            const emptyIndex = arr.indexOf(EMPTY_TILE);
+            const emptyRowFromBottom = GRID_SIZE - Math.floor(emptyIndex / GRID_SIZE);
+
+            for (let i = 0; i < arr.length; i++) {
+                for (let j = i + 1; j < arr.length; j++) {
+                    if (arr[i] !== EMPTY_TILE && arr[j] !== EMPTY_TILE && arr[i] > arr[j]) {
+                        inversions++;
+                    }
+                }
+            }
+
+            if (emptyRowFromBottom % 2 === 0) {
+                return inversions % 2 !== 0;
+            } else {
+                return inversions % 2 === 0;
+            }
+        }
+
+        function render() {
+            container.innerHTML = '';
+            const tileSize = 304 / GRID_SIZE;
+            const currentImage = IMAGE_URLS[currentLevel];
+
+            tiles.forEach((val, index) => {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                tile.dataset.index = index;
+
+                if (val === EMPTY_TILE) {
+                    tile.classList.add('empty');
+                } else {
+                    const origRow = Math.floor(val / GRID_SIZE);
+                    const origCol = val % GRID_SIZE;
+                    const xPos = -(origCol * tileSize);
+                    const yPos = -(origRow * tileSize);
+
+                    tile.style.backgroundImage = `url('${currentImage}')`;
+                    tile.style.backgroundPosition = `${xPos}px ${yPos}px`;
+                    tile.addEventListener('click', () => moveTile(index));
+                }
+                container.appendChild(tile);
+            });
+        }
+
+        function moveTile(index) {
+            const emptyIndex = tiles.indexOf(EMPTY_TILE);
+            const row = Math.floor(index / GRID_SIZE);
+            const col = index % GRID_SIZE;
+            const emptyRow = Math.floor(emptyIndex / GRID_SIZE);
+            const emptyCol = emptyIndex % GRID_SIZE;
+
+            const isAdjacent = (Math.abs(row - emptyRow) + Math.abs(col - emptyCol)) === 1;
+
+            if (isAdjacent) {
+                [tiles[index], tiles[emptyIndex]] = [tiles[emptyIndex], tiles[index]];
+                render();
+                if (isSolved(tiles)) {
+                    if (currentLevel < IMAGE_URLS.length - 1) {
+                        statusText.innerText = '🎉 Level Solved!';
+                        nextBtn.style.display = 'inline-block';
+                    } else {
+                        statusText.innerText = '🏆 You completed all levels!';
+                    }
+                }
+            }
+        }
+
+        // Fast A* Solver for 4x4 Grid
+        function getManhattanDistance(state) {
+            let dist = 0;
+            for (let i = 0; i < state.length; i++) {
+                const val = state[i];
+                if (val !== EMPTY_TILE) {
+                    const targetRow = Math.floor(val / GRID_SIZE);
+                    const targetCol = val % GRID_SIZE;
+                    const currentRow = Math.floor(i / GRID_SIZE);
+                    const currentCol = i % GRID_SIZE;
+                    dist += Math.abs(targetRow - currentRow) + Math.abs(targetCol - currentCol);
+                }
+            }
+            return dist;
+        }
+
+        function showHint() {
+            if (isSolved(tiles)) return;
+
+            const nextMoveTileIndex = getNextBestMove(tiles);
+            if (nextMoveTileIndex !== null) {
+                const tileElements = container.querySelectorAll('.tile');
+                const targetElement = tileElements[nextMoveTileIndex];
+
+                if (targetElement) {
+                    targetElement.classList.add('hint-tile');
+                    statusText.innerText = '💡 Try moving the highlighted tile!';
+                    setTimeout(() => {
+                        targetElement.classList.remove('hint-tile');
+                        if (!isSolved(tiles)) statusText.innerText = '';
+                    }, 1500);
+                }
+            }
+        }
+
+        function getNextBestMove(startState) {
+            const openSet = [{ state: startState, g: 0, h: getManhattanDistance(startState), firstMove: null }];
+            const visited = new Set();
+            visited.add(startState.join(','));
+
+            let iterations = 0;
+            const maxIterations = 8000;
+
+            while (openSet.length > 0 && iterations < maxIterations) {
+                iterations++;
+                openSet.sort((a, b) => (a.g + a.h) - (b.g + b.h));
+                const current = openSet.shift();
+
+                if (isSolved(current.state)) {
+                    return current.firstMove;
+                }
+
+                const emptyIndex = current.state.indexOf(EMPTY_TILE);
+                const row = Math.floor(emptyIndex / GRID_SIZE);
+                const col = emptyIndex % GRID_SIZE;
+
+                const neighbors = [
+                    { r: row - 1, c: col },
+                    { r: row + 1, c: col },
+                    { r: row, c: col - 1 },
+                    { r: row, c: col + 1 }
+                ];
+
+                for (const n of neighbors) {
+                    if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
+                        const targetIndex = n.r * GRID_SIZE + n.c;
+                        const newState = [...current.state];
+                        [newState[emptyIndex], newState[targetIndex]] = [newState[targetIndex], newState[emptyIndex]];
+
+                        const key = newState.join(',');
+                        if (!visited.has(key)) {
+                            visited.add(key);
+                            openSet.push({
+                                state: newState,
+                                g: current.g + 1,
+                                h: getManhattanDistance(newState),
+                                firstMove: current.firstMove === null ? targetIndex : current.firstMove
+                            });
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        function nextLevel() {
+            if (currentLevel < IMAGE_URLS.length - 1) {
+                currentLevel++;
+                initGame();
+            }
+        }
+
+        function isSolved(arr) {
+            for (let i = 0; i < arr.length; i++) {
+                if (arr[i] !== i) return false;
+            }
+            return true;
+        }
+
+        initGame();
+    </script>
+</body>
+</html>
