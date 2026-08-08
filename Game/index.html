@@ -9,19 +9,20 @@
             box-sizing: border-box;
             user-select: none;
             -webkit-user-select: none;
-            touch-action: none; /* Prevents default mobile browser scrolling while dragging tiles */
+            /* REMOVED touch-action: none; from everywhere */
         }
-        body {
+       body {
             background-color: #1a0f1d;
             color: #ffd700;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            min-height: 100vh;
+            justify-content: flex-start; /* Changed from center to allow top-down scrolling */
+            min-height: 100vh;           /* Changed height to min-height */
             margin: 0;
             padding: 20px;
+            overflow-y: auto;            /* Enables vertical scrolling */
         }
         h1 {
             font-size: 1.5rem;
@@ -69,7 +70,8 @@
             box-shadow: 0 6px 15px rgba(0,0,0,0.5);
         }
 
-        #puzzle-container {
+       #puzzle-container {
+            touch-action: none;
             width: 320px;
             height: 320px;
             background: #2b1730;
