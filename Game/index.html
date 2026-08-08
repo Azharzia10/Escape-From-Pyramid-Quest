@@ -131,7 +131,7 @@
     </div>
 
     <script>
-        const GRID_SIZE = 4; // 4x4 Grid (16 blocks)
+        const GRID_SIZE = 4; // 4x4 Grid
         const EMPTY_TILE = GRID_SIZE * GRID_SIZE - 1; // Tile 15
         
         const IMAGE_URLS = [
@@ -148,6 +148,8 @@
 
         let currentLevel = 0;
         let tiles = [];
+        let cachedHintPath = []; // Memory cache for non-looping hint paths
+
         const container = document.getElementById('puzzle-container');
         const statusText = document.getElementById('status');
         const levelInfo = document.getElementById('level-info');
@@ -157,6 +159,7 @@
             statusText.innerText = '';
             nextBtn.style.display = 'none';
             levelInfo.innerText = `Level ${currentLevel + 1} of ${IMAGE_URLS.length}`;
+            cachedHintPath = [];
 
             do {
                 tiles = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => i);
@@ -230,6 +233,7 @@
 
             if (isAdjacent) {
                 [tiles[index], tiles[emptyIndex]] = [tiles[emptyIndex], tiles[index]];
+                cachedHintPath = []; // Invalidate cached path on manual moves
                 render();
                 if (isSolved(tiles)) {
                     if (currentLevel < IMAGE_URLS.length - 1) {
@@ -242,70 +246,51 @@
             }
         }
 
-        // --- STAGE-BASED HINT ENGINE ---
+        // --- GUARANTEED SUB-GOAL PATH ENGINE ---
 
         function getStageInfo(state) {
-            if (state[0] !== 0) return { target: [0], locked: [] };
-            if (state[1] !== 1) return { target: [1], locked: [0] };
-            if (state[2] !== 2 || state[3] !== 3) return { target: [2, 3], locked: [0, 1] };
-            if (state[4] !== 4) return { target: [4], locked: [0, 1, 2, 3] };
-            if (state[5] !== 5) return { target: [5], locked: [0, 1, 2, 3, 4] };
-            if (state[6] !== 6 || state[7] !== 7) return { target: [6, 7], locked: [0, 1, 2, 3, 4, 5] };
-            return { target: [8, 9, 10, 11, 12, 13, 14, 15], locked: [0, 1, 2, 3, 4, 5, 6, 7] };
+            if (state[0] !== 0) return { targets: [0], isDone: s => s[0] === 0, locked: [] };
+            if (state[1] !== 1) return { targets: [1], isDone: s => s[1] === 1, locked: [0] };
+            if (state[2] !== 2 || state[3] !== 3) return { targets: [2, 3], isDone: s => s[2] === 2 && s[3] === 3, locked: [0, 1] };
+            if (state[4] !== 4) return { targets: [4], isDone: s => s[4] === 4, locked: [0, 1, 2, 3] };
+            if (state[5] !== 5) return { targets: [5], isDone: s => s[5] === 5, locked: [0, 1, 2, 3, 4] };
+            if (state[6] !== 6 || state[7] !== 7) return { targets: [6, 7], isDone: s => s[6] === 6 && s[7] === 7, locked: [0, 1, 2, 3, 4, 5] };
+            return { targets: [8, 9, 10, 11, 12, 13, 14, 15], isDone: s => isSolved(s), locked: [0, 1, 2, 3, 4, 5, 6, 7] };
         }
 
-        function isStageSatisfied(state, stage) {
-            for (let t of stage.target) {
-                if (state[t] !== t) return false;
-            }
-            return true;
-        }
-
-        function getStageHeuristic(state, stage) {
+        function getStageHeuristic(state, targets) {
             let h = 0;
-            for (let t of stage.target) {
-                const idx = state.indexOf(t);
+            for (let t of targets) {
+                const currentIdx = state.indexOf(t);
+                const cr = Math.floor(currentIdx / GRID_SIZE);
+                const cc = currentIdx % GRID_SIZE;
                 const tr = Math.floor(t / GRID_SIZE);
                 const tc = t % GRID_SIZE;
-                const cr = Math.floor(idx / GRID_SIZE);
-                const cc = idx % GRID_SIZE;
-                h += (Math.abs(tr - cr) + Math.abs(tc - cc)) * 10;
-            }
-            for (let i = 0; i < state.length; i++) {
-                if (state[i] !== EMPTY_TILE) {
-                    const val = state[i];
-                    const tr = Math.floor(val / GRID_SIZE);
-                    const tc = val % GRID_SIZE;
-                    const cr = Math.floor(i / GRID_SIZE);
-                    const cc = i % GRID_SIZE;
-                    h += Math.abs(tr - cr) + Math.abs(tc - cc);
-                }
+                h += Math.abs(cr - tr) + Math.abs(cc - tc);
             }
             return h;
         }
 
-        function getNextBestMove(startState) {
+        function findPathForStage(startState) {
             const stage = getStageInfo(startState);
-            const openSet = [{ 
-                state: startState, 
-                g: 0, 
-                h: getStageHeuristic(startState, stage), 
-                firstMove: null 
+            if (stage.isDone(startState)) return [];
+
+            const openSet = [{
+                state: startState,
+                path: [],
+                g: 0,
+                h: getStageHeuristic(startState, stage.targets)
             }];
-            
+
             const visited = new Set();
             visited.add(startState.join(','));
 
-            let iterations = 0;
-            const maxIterations = 5000;
-
-            while (openSet.length > 0 && iterations < maxIterations) {
-                iterations++;
+            while (openSet.length > 0) {
                 openSet.sort((a, b) => (a.g + a.h) - (b.g + b.h));
                 const current = openSet.shift();
 
-                if (isStageSatisfied(current.state, stage)) {
-                    return current.firstMove;
+                if (stage.isDone(current.state)) {
+                    return current.path;
                 }
 
                 const emptyIndex = current.state.indexOf(EMPTY_TILE);
@@ -322,50 +307,54 @@
                 for (const n of neighbors) {
                     if (n.r >= 0 && n.r < GRID_SIZE && n.c >= 0 && n.c < GRID_SIZE) {
                         const targetIndex = n.r * GRID_SIZE + n.c;
+
+                        // Never move or touch locked tiles
+                        if (stage.locked.includes(targetIndex)) continue;
+
                         const newState = [...current.state];
                         [newState[emptyIndex], newState[targetIndex]] = [newState[targetIndex], newState[emptyIndex]];
 
                         const key = newState.join(',');
                         if (!visited.has(key)) {
                             visited.add(key);
-                            
-                            let stepCost = 1;
-                            if (stage.locked.includes(targetIndex)) {
-                                stepCost += 40; // Discourages disturbing completed rows
-                            }
-
                             openSet.push({
                                 state: newState,
-                                g: current.g + stepCost,
-                                h: getStageHeuristic(newState, stage),
-                                firstMove: current.firstMove === null ? targetIndex : current.firstMove
+                                path: [...current.path, targetIndex],
+                                g: current.g + 1,
+                                h: getStageHeuristic(newState, stage.targets)
                             });
                         }
                     }
                 }
             }
-
-            // Fallback: If empty tile has adjacent tiles, pick one
-            const emptyIndex = startState.indexOf(EMPTY_TILE);
-            const row = Math.floor(emptyIndex / GRID_SIZE);
-            const col = emptyIndex % GRID_SIZE;
-            const fallbacks = [
-                { r: row - 1, c: col }, { r: row + 1, c: col },
-                { r: row, c: col - 1 }, { r: row, c: col + 1 }
-            ];
-            for (let f of fallbacks) {
-                if (f.r >= 0 && f.r < GRID_SIZE && f.c >= 0 && f.c < GRID_SIZE) {
-                    return f.r * GRID_SIZE + f.c;
-                }
-            }
-            return null;
+            return [];
         }
 
         function showHint() {
             if (isSolved(tiles)) return;
 
-            const nextMoveTileIndex = getNextBestMove(tiles);
-            if (nextMoveTileIndex !== null) {
+            // Check if cached path is valid for current empty position
+            const emptyIdx = tiles.indexOf(EMPTY_TILE);
+            if (cachedHintPath.length > 0) {
+                const nextTileIdx = cachedHintPath[0];
+                const er = Math.floor(emptyIdx / GRID_SIZE);
+                const ec = emptyIdx % GRID_SIZE;
+                const tr = Math.floor(nextTileIdx / GRID_SIZE);
+                const tc = nextTileIdx % GRID_SIZE;
+
+                // Clear path if invalid due to user interactions
+                if (Math.abs(er - tr) + Math.abs(ec - tc) !== 1) {
+                    cachedHintPath = [];
+                }
+            }
+
+            // Generate fresh path if empty or reset
+            if (cachedHintPath.length === 0) {
+                cachedHintPath = findPathForStage(tiles);
+            }
+
+            if (cachedHintPath.length > 0) {
+                const nextMoveTileIndex = cachedHintPath.shift();
                 const tileElements = container.querySelectorAll('.tile');
                 const targetElement = tileElements[nextMoveTileIndex];
 
